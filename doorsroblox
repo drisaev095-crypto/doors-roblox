@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DOORS - Ultimate HTML Edition</title>
+    <style>
+        body {
+            background-color: #050507;
+            color: #d1c7bd;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            user-select: none; /* Запрещаем выделение текста во время кликов */
+        }
+        #game-container {
+            width: 750px;
+            height: 550px;
+            background-color: #110e0c;
+            border: 4px solid #3a2f28;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 0 40px rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+        }
+        #top-ui {
+            display: flex;
+            justify-content: space-between;
+            font-size: 16px;
+            border-bottom: 2px solid #3a2f28;
+            padding-bottom: 10px;
+        }
+        .stats span { 
+            color: #f4ebd9; 
+            font-weight: bold; 
+        }
+        #viewport {
+            width: 100%;
+            height: 180px;
+            background-color: #0a0a0c;
+            border: 2px solid #251e19;
+            margin-top: 10px;
+            border-radius: 6px;
+        }
+        #display-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 10px 20px;
+        }
+        #room-title {
+            font-size: 26px;
+            margin-bottom: 5px;
+            color: #f4ebd9;
+            text-shadow: 0 0 5px rgba(244,235,217,0.3);
+        }
+        #event-text {
+            font-size: 15px;
+            min-height: 50px;
+            color: #a49688;
+            line-height: 1.4;
+        }
+        #inventory-bar {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            background: #181411;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #2b211a;
+            margin-bottom: 10px;
+        }
+        .inv-slot {
+            background: #2b211a;
+            border: 1px solid #44352a;
+            padding: 5px 10px;
+            font-size: 12px;
+            color: #d1c7bd;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .inv-slot:hover { background: #3d3025; }
+        .inv-slot:disabled { opacity: 0.4; cursor: not-allowed; }
+        #action-area {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #2b211a;
+            color: #f4ebd9;
+            border: 2px solid #523f33;
+            padding: 10px 18px;
+            font-family: inherit;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border-radius: 5px;
+        }
+        button:hover:not(:disabled) {
+            background-color: #523f33;
+            color: #fff;
+            box-shadow: 0 0 8px rgba(244,235,217,0.2);
+        }
+        button:disabled {
+            background-color: #14110f;
+            color: #443a32;
+            border-color: #2b211a;
+            cursor: not-allowed;
+        }
+        .screamer { animation: shake 0.15s infinite; color: #ff0000 !important; font-size: 36px !important; }
+        .glitch { animation: shake 0.3s infinite; color: #00ffcc !important; }
+        @keyframes shake {
+            0% { transform: translate(2px, 1px); }
+            50% { transform: translate(-2px, -1px); }
+            100% { transform: translate(1px, 2px); }
+        }
+        .blink { animation: flicker 0.4s ease-in-out infinite; }
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.1; }
+        }
+    </style>
+</head>
+<body>
+<div id="game-container">
+    <div id="top-ui">
+        <div class="stats">Комната: <span id="room-count">0</span>/50</div>
+        <div class="stats">Здоровье: <span id="health-count">100</span>%</div>
+        <div class="stats">Фонарь: <span id="battery-count">0</span>%</div>
+    </div>
+
+    <!-- Холст для рисования окружения -->
+    <canvas id="viewport" width="710" height="180"></canvas>
+
+    <div id="inventory-bar">
+        <button class="inv-slot" id="use-flashlight" onclick="useItem('flashlight')">Фонарик (выкл)</button>
+        <button class="inv-slot" id="use-battery" onclick="useItem('battery')">Батарейка (0)</button>
+        <button class="inv-slot" id="use-vitamins" onclick="useItem('vitamins')">Витамины (0)</button>
+        <button class="inv-slot" id="use-key" onclick="useItem('key')" disabled>Ключ (0)</button>
+    </div>
+
+    <div id="display-area">
+        <div id="room-title">Дверь 0</div>
+        <div id="event-text">Вы стоите в лобби отеля. Игра началась. Удачи дойти до 50-й комнаты.</div>
+    </div>
+
+    <div id="action-area">
+        <button id="btn-door" onclick="openDoor()">Открыть дверь</button>
+        <button id="btn-closet" onclick="toggleCloset()">Спрятаться в шкаф</button>
+        <button id="btn-search" onclick="searchRoom()">Обыскать ящики</button>
+    </div>
+</div>
+<script>
+    // Звуковой движок Web Audio (работает без аудио-файлов)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq, type, duration, volume = 0.1) {
+        try {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        } catch(e){}
+    }
+
+    // Глобальные переменные состояния игры
+    let currentRoom = 0;
+    let health = 100;
+    let monsterActive = false;
+    let currentMonster = null;
+    let isHidden = false;
+    let isDarkRoom = false;
+    let roomSearched = false;
+    let isLockedDoor = false;
+
+    // Объект инвентаря
+    let items = {
+        hasFlashlight: false,
+        flashlightOn: false,
+        batteryPercent: 0,
+        batteries: 0,
+        vitamins: 0,
+        keys: 0
+    };
+
+    // Переменные для таймеров монстров
+    let monsterTimeout = null;
+    let soundInterval = null;
+    let vitaminEffect = false;
+
+    // Получение ссылок на DOM элементы
+    const canvas = document.getElementById('viewport');
+    const ctx = canvas.getContext('2d');
+    const roomTitle = document.getElementById('room-title');
+    const eventText = document.getElementById('event-text');
+    const container = document.getElementById('game-container');
+    function drawScene() {
+        // Определение базового фона (темно или светло)
+        ctx.fillStyle = isDarkRoom && !items.flashlightOn ? '#050505' : '#1a1410';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Линии перспективы (стены коридора)
+        ctx.strokeStyle = '#3a2f28';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(200, 50); ctx.lineTo(200, 130); ctx.lineTo(0, 180);
+        ctx.moveTo(710, 0); ctx.lineTo(510, 50); ctx.lineTo(510, 130); ctx.lineTo(710, 180);
+        ctx.stroke();
+
+        // Отрисовка двери впереди
+        ctx.fillStyle = isLockedDoor ? '#4a2511' : '#5c3a21';
+        ctx.fillRect(320, 40, 70, 110);
+        ctx.strokeStyle = '#1a110b';
+        ctx.strokeRect(320, 40, 70, 110);
+        ctx.fillStyle = '#cc9933'; // Ручка двери
+        ctx.beginPath(); ctx.arc(330, 95, 4, 0, Math.PI*2); ctx.fill();
+
+        // Отрисовка шкафа слева
+        ctx.fillStyle = isHidden ? '#1e140d' : '#2d1f15';
+        ctx.fillRect(60, 45, 50, 100);
+        ctx.strokeRect(60, 45, 50, 100);
+
+        // Отрисовка комода справа
+        ctx.fillStyle = '#3d281a';
+        ctx.fillRect(580, 80, 60, 60);
+        ctx.fillStyle = '#1e140d';
+        ctx.fillRect(585, 90, 50, 15);
+        ctx.fillRect(585, 115, 50, 15);
+
+        // Отрисовка монстров на холсте, если они активны
+        if (monsterActive) {
+            if (currentMonster === 'Rush' || currentMonster === 'Ambush') {
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.beginPath(); ctx.arc(355, 90, 35, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#000';
+                ctx.fillRect(335, 75, 12, 12); ctx.fillRect(363, 75, 12, 12);
+            } else if (currentMonster === 'Eyes') {
+                ctx.fillStyle = '#ff00ff';
+                for(let i=0; i<5; i++) {
+                    ctx.beginPath(); ctx.arc(310 + (i*25), 70 + (i%2*20), 10, 0, Math.PI*2); ctx.fill();
+                }
+            } else if (currentMonster === 'Seek') {
+                ctx.fillStyle = '#000'; ctx.fillRect(280, 30, 150, 130);
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(355, 90, 18, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(355, 90, 6, 0, Math.PI*2); ctx.fill();
+            } else if (currentMonster === 'Figure') {
+                ctx.fillStyle = '#4a0d0d'; ctx.fillRect(330, 40, 50, 110);
+                ctx.fillStyle = '#ff3333'; ctx.beginPath(); ctx.arc(355, 65, 15, 0, Math.PI); ctx.fill();
+            }
+        }
+
+        // Эффект нахождения внутри шкафа (затемнение краев)
+        if (isHidden) {
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#333';
+            ctx.strokeRect(200, 10, 310, 160);
+        }
+
+        // Отрисовка луча фонарика
+        if (items.flashlightOn && !isHidden) {
+            let gradient = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 20, canvas.width/2, canvas.height/2, 150);
+            gradient.addColorStop(0, 'rgba(255,255,200,0.3)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+        }
+    }
+    function updateUI() {
+        document.getElementById('room-count').textContent = currentRoom;
+        document.getElementById('health-count').textContent = health;
+        document.getElementById('battery-count').textContent = items.batteryPercent;
+        
+        // Текст на кнопках инвентаря
+        document.getElementById('use-flashlight').textContent = `Фонарик (${items.hasFlashlight ? (items.flashlightOn ? 'ВКЛ' : 'ВЫКЛ') : 'Нет'})`;
+        document.getElementById('use-battery').textContent = `Батарейка (${items.batteries})`;
+        document.getElementById('use-vitamins').textContent = `Витамины (${items.vitamins})`;
+        document.getElementById('use-key').textContent = `Ключ (${items.keys})`;
+        document.getElementById('use-key').disabled = items.keys === 0;
+
+        document.getElementById('btn-closet').textContent = isHidden ? "Выйти из шкафа" : "Спрятаться в шкаф";
+        document.getElementById('btn-search').disabled = roomSearched || isHidden || monsterActive;
+
+        // Проверка условий окончания игры
+        if (health <= 0) endGame("ВЫ ПОГИБЛИ. Вы не смогли сбежать из отеля.");
+        if (currentRoom >= 50) endGame("ПОБЕДА! Вы открыли 50-ю дверь и вырвались на свободу!");
+        
+        drawScene();
+    }
+    function openDoor() {
+        if (isHidden) return;
+        if (isLockedDoor) {
+            eventText.textContent = "Дверь заперта на замок! Найдите ключ в этой комнате.";
+            playTone(120, 'square', 0.2);
+            return;
+        }
+
+        currentRoom++;
+        roomSearched = false;
+        
+        // Шансы генерации состояний комнат
+        isDarkRoom = Math.random() < 0.25 && currentRoom > 2;
+        isLockedDoor = Math.random() < 0.2 && currentRoom > 4;
+
+        roomTitle.textContent = `Дверь ${currentRoom}`;
+        roomTitle.className = '';
+        container.className = '';
+        
+        if (isDarkRoom) {
+            eventText.textContent = "Вы зашли в абсолютно ТЕМНУЮ комнату. Здесь ничего не видно!";
+            playTone(80, 'sine', 0.4);
+        } else {
+            eventText.textContent = "Вы перешли в следующую комнату.";
+            playTone(180, 'triangle', 0.15);
+        }
+
+        // Разрядка работающего фонарика при переходе
+        if (items.flashlightOn) {
+            items.batteryPercent = Math.max(0, items.batteryPercent - 8);
+            if (items.batteryPercent === 0) items.flashlightOn = false;
+        }
+
+        // Расчет спавна монстров
+        let rand = Math.random();
+
+        // Сюжетные погони
+        if (currentRoom === 15 || currentRoom === 35) {
+            startSeekChase();
+            return;
+        }
+        if (currentRoom === 49) {
+            startFigureBoss();
+            return;
+        }
+
+        // Случайные монстры
+        if (rand < 0.20 && currentRoom > 3 && !isDarkRoom) {
+            triggerLightBlink();
+            eventText.textContent = "Свет моргнул! Сзади доносится нарастающий гул... СКОРЕЕ В ШКАФ!";
+            spawnRushOrAmbush('Rush', vitaminEffect ? 3500 : 2500);
+        }
+        else if (rand >= 0.20 && rand < 0.25 && currentRoom > 12) {
+            triggerLightBlink();
+            eventText.textContent = "Свет бешено замигал! Это Амбуш! Прячьтесь!";
+            spawnRushOrAmbush('Ambush', 1800);
+        }
+        else if (rand >= 0.25 && rand < 0.35 && currentRoom > 5) {
+            spawnEyes();
+        }
+        else if (rand >= 0.35 && rand < 0.38 && isDarkRoom) {
+            // Нападение Скрича в темноте без света
+            if (!items.flashlightOn) {
+                health -= 30;
+                roomTitle.textContent = "ПСССТ!";
+                roomTitle.className = 'screamer';
+                eventText.textContent = "Скрич (Screech) укусил вас из темноты! Включайте фонарь в темных комнатах!";
+                playTone(800, 'sawtooth', 0.3, 0.4);
+            }
+        }
+
+        updateUI();
+    }
+
+    function triggerLightBlink() {
+        container.classList.add('blink');
+        playTone(50, 'sawtooth', 0.5, 0.3);
+        setTimeout(() => container.classList.remove('blink'), 600);
+    }
+    function toggleCloset() {
+        if (currentMonster === 'Eyes' || currentMonster === 'Seek') {
+            eventText.textContent = "Шкаф сейчас не спасет!";
+            return;
+        }
+        isHidden = !isHidden;
+        playTone(140, 'square', 0.1);
+        
+        if (isHidden) {
+            eventText.textContent = "Вы залезли в шкаф.";
+            document.getElementById('btn-door').disabled = true;
+        } else {
+            eventText.textContent = "Вы вышли из шкафа.";
+            document.getElementById('btn-door').disabled = false;
+        }
+        updateUI();
+    }
+
+    function searchRoom() {
+        if (roomSearched) return;
+        roomSearched = true;
+        playTone(250, 'triangle', 0.3);
+
+        let loot = Math.random();
+        if (isLockedDoor && items.keys === 0) {
+            items.keys++;
+            eventText.textContent = "Отлично! Вы нашли КЛЮЧ от двери.";
+        } else if (loot < 0.25) {
+            items.vitamins++;
+            eventText.textContent = "Вы нашли Витамины! Они дают больше времени спрятаться на следующий ход.";
+        } else if (loot >= 0.25 && loot < 0.5) {
+            items.batteries++;
+            eventText.textContent = "Вы нашли Батарейку для фонарика.";
+        } else if (loot >= 0.5 && loot < 0.7) {
+            if (!items.hasFlashlight) {
+                items.hasFlashlight = true;
+                items.batteryPercent = 100;
+                eventText.textContent = "Ого! Вы нашли ФОНАРИК! Теперь темные комнаты не страшны.";
+            } else {
+                items.batteries++;
+                eventText.textContent = "Вы нашли запасную батарейку.";
+            }
+        } else {
+            health = Math.min(100, health + 25);
+            eventText.textContent = "Вы нашли пластырь и подлечили здоровье.";
+        }
+        updateUI();
+    }
+    function useItem(item) {
+        if (item === 'flashlight' && items.hasFlashlight) {
+            if (items.batteryPercent > 0) {
+                items.flashlightOn = !items.flashlightOn;
+                playTone(400, 'sine', 0.05);
+            } else {
+                eventText.textContent = "Фонарик разряжен!";
+                items.flashlightOn = false;
+            }
+        } else if (item === 'battery' && items.batteries > 0) {
+            items.batteries--;
+            items.batteryPercent = Math.min(100, items.batteryPercent + 50);
+            eventText.textContent = "Вы заменили батарейку.";
+            playTone(300, 'sine', 0.1);
+        } else if (item === 'vitamins' && items.vitamins > 0) {
+            items.vitamins--;
+            vitaminEffect = true;
+            eventText.textContent = "Вы выпили витамины! Реакция повышена на 15 секунд.";
+            playTone(500, 'sine', 0.2);
+            setTimeout(() => { vitaminEffect = false; }, 15000);
+        } else if (item === 'key' && items.keys > 0 && isLockedDoor) {
+            items.keys--;
+            isLockedDoor = false;
+            eventText.textContent = "Вы отперли замок ключом! Путь дальше открыт.";
+            playTone(350, 'triangle', 0.2);
+        }
+        updateUI();
+    }
+    function spawnRushOrAmbush(type, msToHide) {
+        monsterActive = true;
+        currentMonster = type;
+        document.getElementById('btn-door').disabled = true;
+
+        soundInterval = setInterval(() => {
+            if (monsterActive) playTone(110, 'sawtooth', 0.1, 0.2);
+        }, 200);
+
+        monsterTimeout = setTimeout(() => {
+            clearInterval(soundInterval);
+            monsterActive = false;
+
+            if (!isHidden) {
+                health = 0;
+                roomTitle.textContent = "СКРИМЕР!";
+                roomTitle.className = 'screamer';
+                eventText.textContent = `Вас поймал ${type}! Вы не успели спрятаться.`;
+                playTone(45, 'sawtooth', 2, 0.6);
+                updateUI();
+            } else {
+                eventText.textContent = `${type} пролетел мимо шкафа. Путь чист.`;
+                playTone(250, 'sine', 0.4);
+                isHidden = false; 
+                document.getElementById('btn-door').disabled = false;
+                currentMonster = null;
+                
+                if (type === 'Ambush' && Math.random() < 0.5) {
+                    setTimeout(() => {
+                        triggerLightBlink();
+                        eventText.textContent = "О НЕТ! Амбуш ВОЗВРАЩАЕТСЯ! Назад в шкаф!";
+                        spawnRushOrAmbush('Ambush', 1500);
+                    }, 1000);
+                }
+                updateUI();
+            }
+        }, msToHide);
+    }
+
+    function spawnEyes() {
+        monsterActive = true;
+        currentMonster = 'Eyes';
+        eventText.textContent = "В комнате появились ГЛАЗА (Eyes)! Не идите дальше, пока они не исчезнут!";
+        playTone(440, 'sine', 0.8, 0.25);
+
+        setTimeout(() => {
+            if (currentMonster === 'Eyes') {
+                monsterActive = false;
+                currentMonster = null;
+                eventText.textContent = "Глаза испарились. Теперь безопасно идти.";
+                playTone(220, 'sine', 0.2);
+                updateUI();
+            }
+        }, 4500);
+    }
+    function startSeekChase() {
+        monsterActive = true;
+        currentMonster = 'Seek';
+        document.getElementById('btn-closet').disabled = true;
+        document.getElementById('btn-search').disabled = true;
+
+        eventText.textContent = "НАЧАЛАСЬ ПОГОНЯ СИКА! Быстро жмите 'Открыть дверь' несколько раз подряд!";
+        playTone(70, 'sawtooth', 1, 0.4);
+
+        let clicksRequired = 4;
+        let timeAvailable = 5000;
+
+        const originalOpenDoor = openDoor;
+        window.openDoor = function() {
+            clicksRequired--;
+            playTone(180, 'square', 0.1, 0.2);
+            eventText.textContent = `Вы бежите! Осталось дверей: ${clicksRequired}`;
+            
+            if (clicksRequired <= 0) {
+                clearTimeout(seekTimeout);
+                monsterActive = false;
+                currentMonster = null;
+                window.openDoor = originalOpenDoor; 
+                document.getElementById('btn-closet').disabled = false;
+                eventText.textContent = "Вы убежали от Сика!";
+                updateUI();
+            }
+        };
+
+        let seekTimeout = setTimeout(() => {
+            if (currentMonster === 'Seek') {
+                health = 0;
+                roomTitle.textContent = "ПОЙМАН!";
+                roomTitle.className = 'screamer';
+                eventText.textContent = "Сик поглотил вас.";
+                window.openDoor = originalOpenDoor;
+                updateUI();
+            }
+        }, timeAvailable);
+        updateUI();
+    }
+
+    function startFigureBoss() {
+        monsterActive = true;
+        currentMonster = 'Figure';
+        document.getElementById('btn-door').disabled = true;
+        document.getElementById('btn-search').disabled = true;
+
+        let beats = 0;
+        let canPress = false;
+        let figureInterval = setInterval(() => {
+            if (health <= 0 || currentMonster !== 'Figure') {
+                clearInterval(figureInterval);
+                return;
+            }
+
+            canPress = true;
+            playTone(100, 'sine', 0.15, 0.5); // Стук сердца
+            eventText.textContent = `ПУЛЬС! Нажмите 'Спрятаться в шкаф' СЕЙЧАС! (Успешно: ${beats}/4)`;
+            
+            let missTimeout = setTimeout(() => {
+                if (canPress) {
+                    health -= 35;
+                    eventText.textContent = "Вы сбились с ритма! Фигура ударила вас!";
+                    playTone(60, 'sawtooth', 0.4);
+                    updateUI();
+                }
+            }, 1000);
+
+            window.toggleCloset = function() {
+                if (canPress) {
+                    canPress = false;
+                    clearTimeout(missTimeout);
+                    beats++;
+                    playTone(300, 'sine', 0.05);
+                    if (beats >= 4) {
+                        clearInterval(figureInterval);
+                        monsterActive = false; currentMonster = null;
+                        restoreNormalControls();
+                        eventText.textContent = "Вы прошли Фигуру! Путь к двери 50 свободен!";
+                        isLockedDoor = false;
+                        updateUI();
+                    }
+                } else {
+                    health -= 35;
+                    eventText.textContent = "Вы нажали мимо ритма! Фигура услышала!";
+                    updateUI();
+                }
+            };
+        }, 2200);
+
+        function restoreNormalControls() {
+            document.getElementById('btn-door').disabled = false;
+            document.getElementById('btn-search').disabled = false;
+            window.toggleCloset = function() { isHidden = !isHidden; updateUI(); };
+        }
+    }
+    function endGame(message) {
+        document.getElementById('btn-door').disabled = true;
+        document.getElementById('btn-closet').disabled = true;
+        document.getElementById('btn-search').disabled = true;
+        eventText.textContent = message;
+        clearInterval(soundInterval);
+        clearTimeout(monsterTimeout);
+        
+        // Добавление кнопки перезапуска страницы
+        const restartBtn = document.createElement('button');
+        restartBtn.textContent = "Начать заново";
+        restartBtn.style.marginTop = "10px";
+        restartBtn.onclick = () => location.reload();
+        document.getElementById('action-area').appendChild(restartBtn);
+    }
+
+    // Первичный запуск отрисовки и UI при старте
+    updateUI();
+</script>
+</body>
+</html>
